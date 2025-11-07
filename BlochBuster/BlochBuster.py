@@ -1524,7 +1524,7 @@ def run(configFile, leapFactor=1):
 
                 plt.close()
             ffmpegWriter.write(outFile)
-            print('Saved ouput to "{}"'.format(outFile))
+            print('Saved output to "{}"'.format(outFile))
 
 
 def parseAndRun():
