@@ -1,0 +1,86 @@
+title: Diffusion Long BS 
+TR: 80
+nTR: 1
+nDummies: 0
+B0: 1.5
+pulseSeq:
+  - t: 0
+    FA: 90
+    dur: 2
+    B1: 'RF/exc_min_phase.yml'
+    B1map: [[1.75, 1.50, 1.25, 1, .75, .50, 0.25]]
+    #B1map: [[1.375, 1.25, 1.125, 1, .875, .75, 0.625]]
+
+  - t: 3
+    Gx: 30
+    dur: 3
+  - t: 7
+    FA: 25
+    B1: 'RF/bsse_20ms_1khz.yml'
+    dur: 23.152 # [ms]
+    B1map: [[1.375, 1.25, 1.125, 1, .875, .75, 0.625]]
+  - t: 35
+    FA: 180
+    B1: 'RF/ref.yml'
+    dur: 3
+    phase: 90
+    B1map: [[1, 1, 1, 1, 1, 1, 1]]
+  - t: 39
+    FA: 25
+    B1: 'RF/bsse_20ms_1khz.yml'
+    dur: 23.152 # [ms]
+    B1map: [[1.375, 1.25, 1.125, 1, .875, .75, 0.625]]
+  - t: 63
+    Gx: 30
+    dur: 3
+components:
+  - name: still
+    T1: 3000
+    T2: 300
+  - name: diffusive
+    T1: 3000
+    T2: 300
+    Dx: 0.001 # mm^2/s
+    Dy: 0.001 # mm^2/s
+  - name: fast_diffusive
+    T1: 3000
+    T2: 300
+    Dx: 0.005 # mm^2/s
+    Dy: 0.005 # mm^2/s
+nIsochromats: 7
+isochromatStep: 0.03
+locSpacing: 0.001
+locations:
+  'still':
+    [[.75, .75, .75, .75, .75, .75, .75]]
+  'diffusive':
+    [[.75, .75, .75, .75, .75, .75, .75]]
+  'fast_diffusive':
+    [[.75, .75, .75, .75, .75, .75, .75]]
+
+# B1map: [[1.75, 1.50, 1.25, 1, .75, .50, 0.25]]
+
+
+# B1map: 
+#     [[ 1.50, 1.25, 1, .75, .50],
+#      [ 1.50, 1.25, 1, .75, .50],
+#      [ 1.50, 1.25, 1, .75, .50],
+#      [ 1.50, 1.25, 1, .75, .50],
+#      [ 1.50, 1.25, 1, .75, .50]]
+# B1map: 
+#     [[ 1, 1, 1, 1, 1],
+#      [ 1, 1, 1, 1, 1],
+#      [ 1, 1, 1, 1, 1],
+#      [ 1, 1, 1, 1, 1],
+#      [ 1, 1, 1, 1, 1]]
+speed: .01
+maxRFspeed: .002
+output:
+  - type: 3D
+    file: diffusion_3D_BS_coregister_uniform_180_halfgrad_fast_1d.gif
+  - type: psd
+    file: diffusion_psd_BS_coregister_uniform_180_halfgrad_fast_1d.gif
+  - type: xy
+    file: diffusion_xy_BS_coregister_uniform_180_halfgrad_fast_1d.gif
+  # - type: z
+  #   file: diffusion_z_BS_coregister_uniform_180_fast_1d.gif

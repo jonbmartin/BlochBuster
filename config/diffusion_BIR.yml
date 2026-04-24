@@ -1,0 +1,84 @@
+title: Diffusion Long BS 
+TR: 63
+nTR: 1
+nDummies: 0
+B0: 1.5
+pulseSeq:
+  - t: 2
+    FA: 90
+    dur: 4.704
+    B1: 'RF/bir4-90-test.yml'
+
+  # - t: 5
+  #   Gx: 30
+  #   dur: 24
+  # - t: 5
+  #   FA: 10
+  #   B1: 'RF/bsse_20ms_1khz.yml'
+  #   dur: 23.152 # [ms]
+  # - t: 30
+  #   FA: 180
+  #   B1: 'RF/ref.yml'
+  #   dur: 3
+  #   phase: 90
+  - t: 30
+    FA: 360
+    B1: RF/hs1_inv.yml
+    dur: 6
+  # - t: 35
+  #   FA: 10
+  #   B1: 'RF/bsse_20ms_1khz.yml'
+  #   dur: 23.152 # [ms]
+  # - t: 40
+  #   Gx: 30
+  #   dur: 24
+components:
+  - name: still
+    T1: 3000
+    T2: 300
+  - name: diffusive
+    T1: 3000
+    T2: 300
+    Dx: 0.001
+    Dy: 0.001
+nIsochromats: 8
+isochromatStep: 0.03
+locSpacing: 0.001
+locations:
+  'still':
+    [[ .00, .75, .75, .75, .00],
+     [ .75, .00, .00, .00, .75],
+     [ .75, .00, .00, .00, .75],
+     [ .75, .00, .00, .00, .75],
+     [ .00, .75, .75, .75, .00],]
+  'diffusive':
+    [[ .00, .00, .00, .00, .00],
+     [ .00, .75, .75, .75, .00],
+     [ .00, .75, .75, .75, .00],
+     [ .00, .75, .75, .75, .00],
+     [ .00, .00, .00, .00, .00],]
+B1map: 
+    [[ 1.50, 1.25, 1, .75, .50],
+     [ 1.50, 1.25, 1, .75, .50],
+     [ 1.50, 1.25, 1, .75, .50],
+     [ 1.50, 1.25, 1, .75, .50],
+     [ 1.50, 1.25, 1, .75, .50]]
+# B1map: 
+#     [[1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1],
+#      [1, 1, 1, 1, 1, 1, 1]]
+speed: .01
+maxRFspeed: .002
+output:
+  - type: 3D
+    file: diffusion_3D_BIR.gif
+  - type: psd
+    file: diffusion_psd_BIR.gif
+  - type: xy
+    file: diffusion_xy_BIR.gif
+  - type: z
+    file: diffusion_z_BIR.gif

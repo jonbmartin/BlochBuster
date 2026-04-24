@@ -1,0 +1,69 @@
+title: Canet Diff
+pulseSeq:
+    - t: 0
+      FA: 90
+      B1: 'RF/rect.yml'
+      phase: 90
+      dur: 1
+    - t: 10
+      FA: 90
+      B1: 'RF/rect.yml'
+      dur: 1
+      phase: -90
+    - t: 20
+      FA: 90
+      B1: 'RF/rect.yml'
+      phase: 90
+      dur: 1
+    - t: 30
+      FA: 90
+      B1: 'RF/rect.yml'
+      dur: 1
+      phase: -90
+    - t: 40
+      FA: 90
+      B1: 'RF/rect.yml'
+      phase: 90
+      dur: 1
+    - t: 50
+      FA: 90
+      B1: 'RF/rect.yml'
+      dur: 1
+      phase: -90
+TR: 60
+nTR: 5 #5 looks really good
+B0: 1.5
+components:
+    - name: 'diffusing'
+      T1: 260
+      T2: 92.0
+      Dx: 2
+    - name: 'non-diffusing'
+      T1: 260
+      T2: 92.0
+      Dx: 0
+nIsochromats: 20
+isochromatStep: 0.000
+speed: 0.01
+
+# Spatial B1 field map (simulating surface coil inhomogeneity)
+# Values represent relative B1 strength: 1.0 = nominal, 0.5 = half strength
+# Format is [[[z=0, row y, columns x]]]
+B1map: [[[0,2,4,6,8]]]
+
+# Five locations along x-axis where spins will experience different B1
+locations: 
+  'diffusing':
+    [[[0, 0, 1, 0, 0]]]
+  'non-diffusing':
+    [[[0, 0, 1, 0, 0]]]
+
+output: 
+  - type: 3D
+    file: canet_diff.gif
+  - type: psd
+    file: canet_diff_psd.gif
+  - type: xy
+    file: canet_diff_xy.gif
+  - type: z
+    file: canet_diff_z.gif

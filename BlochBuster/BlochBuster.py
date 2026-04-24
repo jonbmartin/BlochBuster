@@ -39,6 +39,7 @@ from pathlib import Path
 import argparse
 import yaml
 import FFMPEGwriter
+from tqdm import tqdm
 
 
 colors = {  'bg':       [1,1,1], 
@@ -458,11 +459,14 @@ def plotFramePSD(config, frame, output):
         boards = {'w1': {'ypos': 4}, 'Gx': {'ypos': 3}, 'Gy': {'ypos': 2}, 'Gz': {'ypos': 1}}
         for board in boards:
             boards[board]['signal'] = [0]
+        phase_signal = [0]  # Track RF phase
         t = [0]
         for event in config['events']:
             for board in boards:
                 boards[board]['signal'].append(boards[board]['signal'][-1]) # end of previous event:
                 boards[board]['signal'].append(event[board]) # start of this event:
+            phase_signal.append(phase_signal[-1])  # end of previous event
+            phase_signal.append(event['phase'])     # start of this event
             t.append(event['t']) # end of previous event:
             t.append(event['t']) # start of this event:
 
@@ -476,6 +480,11 @@ def plotFramePSD(config, frame, output):
             ax.plot([xmin, xmax], [boards[board]['ypos'], boards[board]['ypos']], color=colors['text'], lw=1, clip_on=False, zorder=100)
             ax.text(0, boards[board]['ypos'], board, fontsize=14,
                 color=colors['text'], horizontalalignment='right', verticalalignment='center')
+        
+        # Plot RF phase as a solid line on the w1 board (scaled to ±180°) in orange
+        phase_scale = 0.24 / 180.0  # Scale phase to fit in half the board height
+        ax.plot(t, boards['w1']['ypos'] + np.array(phase_signal) * phase_scale, 
+                lw=1.5, color=[1, 0.6, 0], label='phase[°]')
     
         # plot vertical time line:
         timeLine, = ax.plot([config['tFrames'][frame]%config['TR'], config['tFrames'][frame]%config['TR']], [0, 5], color=colors['text'], lw=1, clip_on=False, zorder=100)
@@ -553,7 +562,79 @@ def getEventFrames(config, i):
     return firstFrame, lastFrame
 
 
-def applyPulseSeq(config, Meq, M0, w, T1, T2, pos0, v, D):
+def getB1scaleAtPosition(B1map, pos, config):
+    '''Get B1 scale factor at a given position by trilinear interpolation of B1map.
+    
+    Args:
+        B1map: 3D array of B1 scaling factors [nz, ny, nx], or None
+        pos: position (x,y,z) in meters
+        config: configuration dictionary with nx, ny, nz, locSpacing
+        
+    Returns:
+        B1 scaling factor at the given position (1.0 if no B1map or out of bounds)
+    '''
+    if B1map is None:
+        return 1.0
+    
+    # Convert position (in meters) to continuous array indices
+    x_continuous = pos[0] / config['locSpacing'] + config['nx']/2 - 0.5
+    y_continuous = pos[1] / config['locSpacing'] + config['ny']/2 - 0.5
+    z_continuous = pos[2] / config['locSpacing'] + config['nz']/2 - 0.5
+    
+    # Get floor indices and interpolation weights
+    x0 = int(np.floor(x_continuous))
+    y0 = int(np.floor(y_continuous))
+    z0 = int(np.floor(z_continuous))
+    
+    x1 = x0 + 1
+    y1 = y0 + 1
+    z1 = z0 + 1
+    
+    # Fractional parts for interpolation
+    xd = x_continuous - x0
+    yd = y_continuous - y0
+    zd = z_continuous - z0
+    
+    # Check if completely out of bounds
+    if (x1 < 0 or x0 >= config['nx'] or
+        y1 < 0 or y0 >= config['ny'] or
+        z1 < 0 or z0 >= config['nz']):
+        return 1.0
+    
+    # Helper function to safely get B1 value (returns 1.0 for out-of-bounds)
+    def safe_get(zi, yi, xi):
+        if (0 <= xi < config['nx'] and 
+            0 <= yi < config['ny'] and 
+            0 <= zi < config['nz']):
+            return B1map[zi][yi][xi]
+        else:
+            return 1.0
+    
+    # Trilinear interpolation
+    c000 = safe_get(z0, y0, x0)
+    c001 = safe_get(z0, y0, x1)
+    c010 = safe_get(z0, y1, x0)
+    c011 = safe_get(z0, y1, x1)
+    c100 = safe_get(z1, y0, x0)
+    c101 = safe_get(z1, y0, x1)
+    c110 = safe_get(z1, y1, x0)
+    c111 = safe_get(z1, y1, x1)
+    
+    # Interpolate along x
+    c00 = c000 * (1 - xd) + c001 * xd
+    c01 = c010 * (1 - xd) + c011 * xd
+    c10 = c100 * (1 - xd) + c101 * xd
+    c11 = c110 * (1 - xd) + c111 * xd
+    
+    # Interpolate along y
+    c0 = c00 * (1 - yd) + c01 * yd
+    c1 = c10 * (1 - yd) + c11 * yd
+    
+    # Interpolate along z
+    return c0 * (1 - zd) + c1 * zd
+
+
+def applyPulseSeq(config, Meq, M0, w, T1, T2, pos0, v, D, B1map=None):
     '''Simulate magnetization vector during nTR (+nDummies) applications of pulse sequence.
     
     Args:
@@ -566,6 +647,7 @@ def applyPulseSeq(config, Meq, M0, w, T1, T2, pos0, v, D):
         pos0:   position (x,y,z) of magnetization vector at t=0 [m].
         v:      velocity (x,y,z) of spins [mm/s]
         D:      diffusivity (x,y,z) of spins [:math:`mm^2/s`]
+        B1map:  3D array of B1 scaling factors [nz, ny, nx], or None for uniform B1 (global fallback)
         
     Returns:
         magnetization vector over time, numpy array of size [6, nFrames]. 1:3 are magnetization, 4:6 are position
@@ -605,7 +687,11 @@ def applyPulseSeq(config, Meq, M0, w, T1, T2, pos0, v, D):
             wg += 2*np.pi*gyro*event['Gy']*pos[firstFrame, 1]/1000 # [kRad/s]
             wg += 2*np.pi*gyro*event['Gz']*pos[firstFrame, 2]/1000 # [kRad/s]
 
-            w1 = event['w1'] * np.exp(1j * np.radians(event['phase']))
+            # Get B1 scale based on current position
+            # Use event-specific B1map if available, otherwise fall back to global B1map
+            eventB1map = event.get('B1map', B1map)
+            B1scale = getB1scaleAtPosition(eventB1map, pos[firstFrame], config)
+            w1 = event['w1'] * B1scale * np.exp(1j * np.radians(event['phase']))
 
             t = config['t'][firstFrame:lastFrame+1]
             if len(t)==0:
@@ -645,7 +731,7 @@ def getB1vector(config):
     return B1vector
 
 
-def simulateComponent(config, component, Meq, M0=None, pos=None):
+def simulateComponent(config, component, Meq, M0=None, pos=None, B1map=None):
     ''' Simulate nIsochromats magnetization vectors per component. Their frequency distribution is Lorenzian if component has a T2* value, otherwise uniform.
 
     Args:
@@ -654,6 +740,7 @@ def simulateComponent(config, component, Meq, M0=None, pos=None):
         Meq:    equilibrium magnetization along z axis.
         M0:     initial state of magnetization vector, numpy array of size 3.
         pos:   position (x,y,z) of magnetization vector [m].
+        B1map:  3D array of B1 scaling factors [nz, ny, nx], or None for uniform B1
         
     Returns:
         component magnetization vectors over time, numpy array of size [nIsochromats, 6, nFrames].  1:3 are magnetization, 4:6 are position.
@@ -671,7 +758,7 @@ def simulateComponent(config, component, Meq, M0=None, pos=None):
 
     for m, isochromat in enumerate(isochromats):
         w = config['w0']*isochromat*1e-6  # Demodulated frequency [kRad / s]
-        comp[m,:,:] = applyPulseSeq(config, Meq, M0, w, component['T1'], component['T2'], pos, v, D)
+        comp[m,:,:] = applyPulseSeq(config, Meq, M0, w, component['T1'], component['T2'], pos, v, D, B1map)
         if 'T2*' in component:
             R2prim = 1/component['T2*'] - 1/component['T2']
             comp[m,:,:] /= 1 + (w/R2prim)**2 # Lorenzian lineshape
@@ -886,7 +973,7 @@ def checkPulseSeq(config):
 
     if 'pulseSeq' not in config:
         config['pulseSeq'] = []
-    allowedKeys = ['t', 'spoil', 'dur', 'FA', 'B1', 'phase', 'Gx', 'Gy', 'Gz']
+    allowedKeys = ['t', 'spoil', 'dur', 'FA', 'B1', 'B1map', 'phase', 'Gx', 'Gy', 'Gz']
     for event in config['pulseSeq']:
         for item in event.keys(): # allowed keys
             if item not in allowedKeys:
@@ -945,6 +1032,17 @@ def checkPulseSeq(config):
 
             event['w1'] = [2 * np.pi * gyro * B1 * 1e-6 for B1 in event['B1']] # kRad / s
             event['RFtext'] = str(int(abs(event['FA'])))+u'\N{DEGREE SIGN}'+'-pulse'
+            
+            # Parse B1map for this event if provided
+            if 'B1map' in event:
+                if isinstance(event['B1map'], list):
+                    # B1map provided as nested list, will be arranged later
+                    pass  # Keep as is for now, will be processed in setupPulseSeq
+                elif isinstance(event['B1map'], str) and event['B1map'] in config.get('B1maps', {}):
+                    # B1map referenced by name from config['B1maps']
+                    event['B1map'] = config['B1maps'][event['B1map']]
+                elif not isinstance(event['B1map'], np.ndarray):
+                    raise Exception('Event B1map must be a list, numpy array, or reference to named B1map')
         if any([key in event for key in ['Gx', 'Gy', 'Gz']]): # Gradient (no RF)
             if not ('dur' in event and event['dur']>0):
                 raise Exception('Gradient must have a specified duration>0 (dur [ms])')
@@ -977,9 +1075,9 @@ def checkPulseSeq(config):
                 subEvent = {'t': t, 'dur': subDur}
                 if i==0 and spoil in event:
                     subEvent['spoil'] = event['spoil']
-                for key in ['w1', 'Gx', 'Gy', 'Gz', 'phase', 'RFtext']:
+                for key in ['w1', 'Gx', 'Gy', 'Gz', 'phase', 'RFtext', 'B1map']:
                     if key in event:
-                        if type(event[key]) is list:
+                        if type(event[key]) is list and key != 'B1map':
                             if i < len(event[key]):
                                 subEvent[key] = event[key][i]
                             else:
@@ -1029,6 +1127,9 @@ def mergeEvent(event, event2merge, t):
     for text in ['RFtext', 'Gxtext', 'Gytext', 'Gztext', 'spoilText']:
         if text in event2merge:
             event[text] = event2merge[text]
+    # Copy B1map if present in event2merge
+    if 'B1map' in event2merge:
+        event['B1map'] = event2merge['B1map']
     if 'spoil' in event2merge:
         event['spoil'] = True
     else:
@@ -1146,16 +1247,16 @@ def setupPulseSeq(config):
     
 
 def arrangeLocations(slices, config, key='locations'):
-    ''' Check and setup locations or M0. Set nx, ny, and nz and store in config.
+    ''' Check and setup locations, M0, or B1map. Set nx, ny, and nz and store in config.
     
     Args:
-        slices: (nested) list of M0 or locations (spatial distribution of Meq).
+        slices: (nested) list of M0, locations (spatial distribution of Meq), or B1map.
         config: configuration dictionary.
-        key:    pass 'locations' for Meq distribution, and 'M0' for M0 distribution.
+        key:    pass 'locations' for Meq distribution, 'M0' for M0 distribution, or 'B1map' for B1 scaling.
         
     '''
-    if key not in ['M0', 'locations']:
-        raise Exception('Argument "key" must be "locations" or "M0", not {}'.format(key))
+    if key not in ['M0', 'locations', 'B1map']:
+        raise Exception('Argument "key" must be "locations", "M0", or "B1map", not {}'.format(key))
     if not isinstance(slices, list):
         raise Exception('Expected list in config "{}", not {}'.format(key, type(slices)))
     if not isinstance(slices[0], list):
@@ -1254,6 +1355,37 @@ def checkConfig(config):
 
     setupPulseSeq(config)
 
+    ### Process event-level B1maps ###
+    # Process B1map arrays in individual events (convert lists to arrays with proper shape)
+    for event in config['events']:
+        if 'B1map' in event and isinstance(event['B1map'], list):
+            # Temporarily store nx, ny, nz if they exist
+            temp_nx = config.get('nx')
+            temp_ny = config.get('ny')
+            temp_nz = config.get('nz')
+            # Temporarily remove nx, ny, nz to allow event-specific dimensions
+            if 'nx' in config:
+                del config['nx']
+            if 'ny' in config:
+                del config['ny']
+            if 'nz' in config:
+                del config['nz']
+            # Arrange the B1map (this will also set/check nx, ny, nz in config)
+            event['B1map'] = arrangeLocations(event['B1map'], config, 'B1map')
+            # Restore original nx, ny, nz values
+            if temp_nx is not None:
+                config['nx'] = temp_nx
+            else:
+                del config['nx']
+            if temp_ny is not None:
+                config['ny'] = temp_ny
+            else:
+                del config['ny']
+            if temp_nz is not None:
+                config['nz'] = temp_nz
+            else:
+                del config['nz']
+
     ### Arrange locations ###
     if not 'collapseLocations' in config:
         config['collapseLocations'] = False
@@ -1284,6 +1416,17 @@ def checkConfig(config):
                 config['M0'][comp] = arrangeLocations(M0, config, 'M0')
         else:
             raise Exception('Config "M0" should be list or components dict')
+    if 'B1map' in config:
+        if isinstance(config['B1map'], dict):
+            for comp in iter(config['B1map']):
+                config['B1map'][comp] = arrangeLocations(config['B1map'][comp], config, 'B1map')
+        elif isinstance(config['B1map'], list):
+            B1map = config['B1map']
+            config['B1map'] = {}
+            for comp in [n['name'] for n in config['components']]:
+                config['B1map'][comp] = arrangeLocations(B1map, config, 'B1map')
+        else:
+            raise Exception('Config "B1map" should be list or components dict')
     
     # check output
     for output in config['output']:
@@ -1443,33 +1586,44 @@ def run(configFile, leapFactor=1):
             colors[i][:3] = list(map(lambda x: 1-x, colors[i][:3]))
 
     ### Simulate ###
+    print('Simulating magnetization...')
     vectors = np.empty((config['nx'],config['ny'],config['nz'],config['nComps'],config['nIsochromats'],6,len(config['t'])))
-    for z in range(config['nz']):
-        for y in range(config['ny']):
-            for x in range(config['nx']):
-                for c, component in enumerate(config['components']):
-                    if component['name'] in config['locations']:
-                        try:
-                            Meq = config['locations'][component['name']][z][y][x]
-                        except:
-                            raise Exception('Is the "location" matrix shape equal for all components?')
-                    elif isinstance(config['locations'], list):
-                        Meq = config['locations'][z][y][x]
-                    else:
-                        Meq = 0.0
-                    if 'M0' in config and component['name'] in config['M0']:
-                        try:
-                            M0 = spherical2cartesian(config['M0'][component['name']][z][y][x])
-                        except:
-                            raise Exception('Is the "M0" matrix shape equal for all components?')
-                    elif 'M0' in config and isinstance(config['M0'], list):
-                        M0 = spherical2cartesian(config['M0'][z][y][x])
-                    else:
-                        M0 = None
-                    pos = [(x+.5-config['nx']/2)*config['locSpacing'],
-                           (y+.5-config['ny']/2)*config['locSpacing'],
-                           (z+.5-config['nz']/2)*config['locSpacing']]
-                    vectors[x,y,z,c,:,:,:] = simulateComponent(config, component, Meq, M0, pos)
+    total_sims = config['nx'] * config['ny'] * config['nz'] * config['nComps']
+    with tqdm(total=total_sims, desc='Simulation', unit='voxel') as pbar:
+        for z in range(config['nz']):
+            for y in range(config['ny']):
+                for x in range(config['nx']):
+                    for c, component in enumerate(config['components']):
+                        if component['name'] in config['locations']:
+                            try:
+                                Meq = config['locations'][component['name']][z][y][x]
+                            except:
+                                raise Exception('Is the "location" matrix shape equal for all components?')
+                        elif isinstance(config['locations'], list):
+                            Meq = config['locations'][z][y][x]
+                        else:
+                            Meq = 0.0
+                        if 'M0' in config and component['name'] in config['M0']:
+                            try:
+                                M0 = spherical2cartesian(config['M0'][component['name']][z][y][x])
+                            except:
+                                raise Exception('Is the "M0" matrix shape equal for all components?')
+                        elif 'M0' in config and isinstance(config['M0'], list):
+                            M0 = spherical2cartesian(config['M0'][z][y][x])
+                        else:
+                            M0 = None
+                        pos = [(x+.5-config['nx']/2)*config['locSpacing'],
+                               (y+.5-config['ny']/2)*config['locSpacing'],
+                               (z+.5-config['nz']/2)*config['locSpacing']]
+                        # Pass the entire B1map array (or None) to simulateComponent
+                        if 'B1map' in config and component['name'] in config['B1map']:
+                            B1map = config['B1map'][component['name']]
+                        elif 'B1map' in config and isinstance(config['B1map'], list):
+                            B1map = config['B1map']
+                        else:
+                            B1map = None
+                        vectors[x,y,z,c,:,:,:] = simulateComponent(config, component, Meq, M0, pos, B1map)
+                        pbar.update(1)
     
     B1vector = getB1vector(config)
 
@@ -1500,29 +1654,34 @@ def run(configFile, leapFactor=1):
             output['freezeFrames'] = []
             for t in output['freeze']:
                 output['freezeFrames'].append(np.argmin(np.abs(config['tFrames'] - t)))
-            for frame in range(0, len(config['tFrames']), leapFactor):
-                # Use only every leapFactor frame in animation
-                if output['type'] == '3D':
-                    fig = plotFrame3D(config, vectors, B1vector, frame, output)
-                elif output['type'] == 'kspace':
-                    fig = plotFrameKspace(config, frame, output)
-                elif output['type'] == 'psd':
-                    fig = plotFramePSD(config, frame, output)
-                elif output['type'] in ['xy', 'z']:
-                    fig = plotFrameMT(config, signal, frame, output)
-                plt.draw()
+            
+            print(f'Rendering {output["type"]} animation: {output["file"]}')
+            frames_to_render = range(0, len(config['tFrames']), leapFactor)
+            with tqdm(total=len(list(frames_to_render)), desc='Rendering', unit='frame') as pbar:
+                for frame in frames_to_render:
+                    # Use only every leapFactor frame in animation
+                    if output['type'] == '3D':
+                        fig = plotFrame3D(config, vectors, B1vector, frame, output)
+                    elif output['type'] == 'kspace':
+                        fig = plotFrameKspace(config, frame, output)
+                    elif output['type'] == 'psd':
+                        fig = plotFramePSD(config, frame, output)
+                    elif output['type'] in ['xy', 'z']:
+                        fig = plotFrameMT(config, signal, frame, output)
+                    plt.draw()
 
-                filesToSave = []
-                if frame in output['freezeFrames']:
-                    filesToSave.append(outFile.parent / (outFile.stem + '_{}.png'.format(str(frame).zfill(4))))
+                    filesToSave = []
+                    if frame in output['freezeFrames']:
+                        filesToSave.append(outFile.parent / (outFile.stem + '_{}.png'.format(str(frame).zfill(4))))
 
-                ffmpegWriter.addFrame(fig)
-                
-                for file in filesToSave:
-                    plt.savefig(file, facecolor=plt.gcf().get_facecolor())
-                    print('Saved frame {}/{} to "{}"'.format(frame+1, len(config['tFrames']), file))
+                    ffmpegWriter.addFrame(fig)
+                    
+                    for file in filesToSave:
+                        plt.savefig(file, facecolor=plt.gcf().get_facecolor())
+                        print('Saved frame {}/{} to "{}"'.format(frame+1, len(config['tFrames']), file))
 
-                plt.close()
+                    plt.close()
+                    pbar.update(1)
             ffmpegWriter.write(outFile)
             print('Saved output to "{}"'.format(outFile))
 

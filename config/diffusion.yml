@@ -55,3 +55,7 @@ output:
     file: diffusion_3D.gif
   - type: psd
     file: diffusion_psd.gif
+  - type: xy
+    file: diffusion_xy.gif
+  - type: z
+    file: diffusion_z.gif

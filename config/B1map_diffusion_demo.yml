@@ -1,0 +1,61 @@
+title: B1 Map Demo - Diffusion Through B1 Gradient
+pulseSeq:
+    - t: 0
+      FA: 90
+      dur: 1
+      phase: 90
+    - t: 100
+      FA: 180
+      dur: 2
+      phase: 0
+TR: 200
+B0: 1.5
+nTR: 1
+
+# 3x3 spatial B1 field map showing strong gradient from center to edges
+# Simulates transmit field inhomogeneity (e.g., dielectric effects at high field)
+B1map:
+  - - [0.6, 0.7, 0.8]
+    - [0.8, 1.0, 0.8]
+    - [0.8, 0.7, 0.6]
+
+# 3x3 grid of locations
+locations:
+  - - [0.5, 0.7, 0.5]
+    - [0.7, 1.0, 0.7]
+    - [0.5, 0.7, 0.5]
+
+# Spins start at center and diffuse outward
+# High diffusion to show movement during sequence
+components:
+    - T1: 1000.0
+      T2: 100.0
+      CS: 0
+      vx: 0.0
+      vy: 0.0
+      vz: 0.0
+      Dx: 0.5
+      Dy: 0.5
+      Dz: 0.0
+      name: 'diffusing spins'
+
+nIsochromats: 5
+locSpacing: 0.02  # 2 cm spacing
+
+speed:
+    - t: 0
+      speed: 1
+
+output:
+    - file: B1map_diffusion_demo_3D.gif
+      type: 3D
+      fps: 15
+      azimuth: -60
+      elevation: 20
+    - file: B1map_diffusion_demo_signal.gif
+      type: xy
+      fps: 15
+
+plotArrowRate: 1
+plotPositionRate: 1
+collapseLocations: false

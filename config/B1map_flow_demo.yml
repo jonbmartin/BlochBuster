@@ -1,0 +1,61 @@
+title: B1 Map Demo - Flow Through Inhomogeneous B1 Field
+pulseSeq:
+    - t: 0
+      FA: 90
+      dur: 1
+      phase: 90
+    - t: 20
+      FA: 90
+      dur: 1
+      phase: 90
+    - t: 40
+      FA: 90
+      dur: 1
+      phase: 90
+    - t: 60
+      FA: 90
+      dur: 1
+      phase: 90
+TR: 80
+B0: 1.5
+nTR: 1
+
+# Spatial B1 field map (simulating surface coil inhomogeneity)
+# Values represent relative B1 strength: 1.0 = nominal, 0.5 = half strength
+# Format is [[[z=0, row y, columns x]]]
+B1map: [[[0, 0, 0.8, 0.6, 0.4]]]
+
+# Five locations along x-axis where spins will experience different B1
+locations: 
+  'diffusing':
+    [[[1, 1, 1, 1, 1]]]
+  'non-diffusing':
+    [[[1, 1, 1, 1, 1]]]
+
+# Spins flow from left (high B1) to right (low B1) at 0.5 mm/ms
+components:
+    - T1: 800.0
+      T2: 80.0
+      CS: 0
+      vx: -300
+      vy: 0
+      vz: 0
+      Dx: 0.0
+      Dy: 0.0
+      Dz: 0.0
+      name: 'flowing spins'
+
+nIsochromats: 1
+locSpacing: 0.01  # 1 cm spacing between locations
+
+speed:
+    - t: 0
+      speed: 1
+
+output:
+    - file: B1map_flow_demo_3D.gif
+      type: 3D
+      fps: 20
+
+plotArrowRate: 1
+plotPositionRate: 1
